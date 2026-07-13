@@ -54,7 +54,7 @@
   const STORE_KEY="relationship-dual-v1";
   const OLD_KEY="relationship-question-answers-v2";
   const MODE_KEY="relationship-mode-v1";
-  const CLOUD_ORIGIN="https://relationship-questions-cn.adventurestarts0207.chatgpt.site";
+  const CLOUD_ORIGIN="https://heart-talk-mobile.heart-talk-cn-space.workers.dev";
   const CLOUD_MIGRATION_KEY="heart-talk-cloud-migration-v1";
   let store={single:{},pairs:{local:{mine:{},partner:{}}}};
   try{const saved=JSON.parse(localStorage.getItem(STORE_KEY)||"null");if(saved&&saved.single&&saved.pairs)store=saved}catch(e){}
