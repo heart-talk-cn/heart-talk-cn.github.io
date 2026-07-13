@@ -18,7 +18,7 @@
   <header class="hero"><div class="inner">
     <span class="tag">给自己，也给彼此一点诚实的时间</span>
     <h1>关系问答手册</h1>
-    <p>单人版保存自己的一份；双人版把两个人的回答分开保存，互不覆盖。录音保留原声，并在支持的浏览器中同步转成文字。</p>
+    <p>单人版保存自己的一份；双人版把两个人的回答分开保存，互不覆盖。原声录音会保留；Safari、Chrome 等支持时才会同步转成文字。</p>
     <div class="mode-box"><button id="singleMode">单人版</button><button id="pairMode">双人版</button></div>
     <p class="pair-note" id="pairNote">双人版中，“我的回答”和“对方回答”使用两份独立记录。</p>
     <div class="progress"><div class="track"><span class="bar" id="bar"></span></div><strong id="count">0/0</strong></div>
@@ -29,22 +29,22 @@
     <input id="search" class="search" placeholder="搜索题目">
     <button class="filter" id="filter">只看未回答</button>
     <button class="export" id="export">导出当前回答</button>
-    <button class="share" id="share">分享当前回答</button>
+    <button class="share" id="share">系统分享当前回答（可选）</button>
     <button class="invite" id="invite">邀请对方回答</button>
-    <button class="share-all" id="shareAll">保存全部并生成分享链接</button>
-    <button class="cloud-migrate" id="cloudMigrate">把本机旧内容迁移到云端新版</button>
+    <button class="share-all" id="shareAll">保存完整网页备份（文字＋录音）</button>
+    <button class="cloud-migrate" id="cloudMigrate">保存到云端并生成浏览器链接</button>
     <p class="notice" id="notice"></p>
   </div></div>
   <div class="share-ready" id="shareReady" role="status" aria-live="polite">
     <strong id="shareReadyTitle">✓ 录音保存成功</strong>
-    <p>现在可以安全分享，不会漏掉刚录的内容。链接用于打开问答页；完整文字和录音会随网页记录一起发送。</p>
-    <div class="share-link-row"><input id="shareLink" readonly aria-label="分享链接"><button id="copyShareLink">复制链接</button><button class="send-record" id="sendRecord">发送完整记录</button></div>
+    <p>本机内容已整理完成。普通网页链接本身不包含原声；要带原声，请保存／发送完整网页文件，或点击上方绿色按钮保存到云端后复制云端链接。</p>
+    <div class="share-link-row"><input id="shareLink" readonly aria-label="普通网页链接"><button id="copyShareLink">复制普通网页链接</button><button class="send-record" id="sendRecord">保存／发送网页文件</button></div>
   </div>
   <div class="save-toast" id="saveToast" role="status" aria-live="assertive"></div>
   <div class="cloud-ready" id="cloudReady" role="status" aria-live="polite">
-    <strong>✓ 旧文字和录音已全部保存到云端</strong>
-    <p id="cloudStatus">请先保存下面的“我的编辑入口”，再把只读分享链接发给对方。</p>
-    <div class="cloud-links"><input id="cloudShareLink" readonly aria-label="云端分享链接"><button id="copyCloudShare">复制分享链接</button><a id="cloudEditorLink" href="#">打开我的云端编辑页</a></div>
+    <strong>✓ 文字和原声已全部保存到云端</strong>
+    <p id="cloudStatus">复制“浏览器分享链接”发给对方；需要换到 Safari／Chrome 继续填写时，只给自己复制“我的编辑入口”。</p>
+    <div class="cloud-links"><input id="cloudShareLink" readonly aria-label="浏览器分享链接"><button id="copyCloudShare">复制浏览器分享链接</button><input id="cloudEditorEntry" readonly aria-label="我的编辑入口"><button id="copyCloudEditor">复制我的编辑入口</button><a id="cloudEditorLink" href="#">直接打开我的云端编辑页</a></div>
   </div>
   <main class="content" id="content"></main>
   <footer>题目页面公开 · 两个人的文字与录音分别保存 · 主动分享后别人才会看到</footer>
@@ -56,13 +56,14 @@
   const MODE_KEY="relationship-mode-v1";
   const CLOUD_ORIGIN="https://heart-talk-mobile.heart-talk-cn-space.workers.dev";
   const CLOUD_MIGRATION_KEY="heart-talk-cloud-migration-v1";
+  const IS_WECHAT=/MicroMessenger/i.test(navigator.userAgent);
   let store={single:{},pairs:{local:{mine:{},partner:{}}}};
   try{const saved=JSON.parse(localStorage.getItem(STORE_KEY)||"null");if(saved&&saved.single&&saved.pairs)store=saved}catch(e){}
   try{const old=JSON.parse(localStorage.getItem(OLD_KEY)||"{}");if(!Object.keys(store.single).length&&Object.keys(old).length){store.single={...old};store.pairs.local.mine={...old}}}catch(e){}
   let mode=localStorage.getItem(MODE_KEY)==="pair"?"pair":"single";
   let pairId="local",side="mine",incoming=null,onlyEmpty=false,activeRecording=null,preparedShare=null,contentRevision=0,toastTimer=null;
   const audioUrls={};
-  const content=document.getElementById("content"),notice=document.getElementById("notice"),search=document.getElementById("search"),filter=document.getElementById("filter"),shareReady=document.getElementById("shareReady"),shareLink=document.getElementById("shareLink"),shareReadyTitle=document.getElementById("shareReadyTitle"),saveToast=document.getElementById("saveToast"),cloudReady=document.getElementById("cloudReady"),cloudStatus=document.getElementById("cloudStatus"),cloudShareLink=document.getElementById("cloudShareLink"),cloudEditorLink=document.getElementById("cloudEditorLink");
+  const content=document.getElementById("content"),notice=document.getElementById("notice"),search=document.getElementById("search"),filter=document.getElementById("filter"),shareReady=document.getElementById("shareReady"),shareLink=document.getElementById("shareLink"),shareReadyTitle=document.getElementById("shareReadyTitle"),saveToast=document.getElementById("saveToast"),cloudReady=document.getElementById("cloudReady"),cloudStatus=document.getElementById("cloudStatus"),cloudShareLink=document.getElementById("cloudShareLink"),cloudEditorEntry=document.getElementById("cloudEditorEntry"),cloudEditorLink=document.getElementById("cloudEditorLink");
 
   function decodePayload(value){try{const b=value.replace(/-/g,"+").replace(/_/g,"/");return JSON.parse(decodeURIComponent(escape(atob(b))))}catch(e){return null}}
   function encodePayload(value){return btoa(unescape(encodeURIComponent(JSON.stringify(value)))).split("+").join("-").split("/").join("_").replace(/=+$/g,"")}
@@ -76,6 +77,7 @@
   function showToast(message){saveToast.textContent=message;saveToast.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>saveToast.classList.remove("show"),3200)}
   function scope(){return mode==="single"?"single":"pair:"+pairId+":"+side}
   function audioKey(i){return scope()+":"+i}
+  function idleMicText(){return IS_WECHAT?"🎙 录原声（微信内不转文字）":"🎙 开始录音"}
   function updateProgress(){const a=answers(),n=Object.values(a).filter(v=>String(v).trim()).length;document.getElementById("count").textContent=n+"/"+questions.length;document.getElementById("bar").style.width=Math.round(n/questions.length*100)+"%"}
   function syncControls(){
     document.getElementById("singleMode").classList.toggle("active",mode==="single");document.getElementById("pairMode").classList.toggle("active",mode==="pair");
@@ -89,7 +91,7 @@
     syncControls();const a=answers(),q=search.value.trim().toLowerCase(),readonly=isReadOnly();content.innerHTML="";
     sections.forEach(s=>{const visible=s.questions.map(x=>({x,i:questions.indexOf(x)})).filter(o=>(!q||o.x.toLowerCase().includes(q))&&(!onlyEmpty||!String(a[o.i]||"").trim()));if(!visible.length)return;
       const sec=document.createElement("section");sec.className="section";sec.innerHTML="<h2>"+s.title+"</h2><p class='section-sub'>"+s.subtitle+"</p>";
-      visible.forEach(o=>{const card=document.createElement("article");card.className="card"+(String(a[o.i]||"").trim()?" done":"");card.innerHTML="<div class='q'><span class='num'>"+(o.i+1)+"</span><h3>"+o.x+"</h3></div><textarea placeholder='录音转写会出现在这里，也可以手动修改'></textarea><p class='readonly-tip'>这是对方发来的基础回答，不会被你修改。</p><button class='mic'>🎙 开始录音</button><span class='record-time'></span><div class='audio-box'><audio controls preload='metadata'></audio><div class='audio-actions'><button class='share-audio'>分享录音</button><button class='download-audio'>下载录音</button><button class='delete-audio'>删除录音</button></div></div>";
+      visible.forEach(o=>{const card=document.createElement("article");card.className="card"+(String(a[o.i]||"").trim()?" done":"");card.innerHTML="<div class='q'><span class='num'>"+(o.i+1)+"</span><h3>"+o.x+"</h3></div><textarea placeholder='录音转写会出现在这里，也可以手动修改'></textarea><p class='readonly-tip'>这是对方发来的基础回答，不会被你修改。</p><button class='mic'>"+idleMicText()+"</button><span class='record-time'></span><div class='audio-box'><audio controls preload='metadata'></audio><div class='audio-actions'><button class='share-audio'>系统分享录音</button><button class='download-audio'>下载录音</button><button class='delete-audio'>删除录音</button></div></div>";
         const ta=card.querySelector("textarea"),mic=card.querySelector(".mic");ta.value=a[o.i]||"";ta.readOnly=readonly;mic.classList.toggle("hidden",readonly);card.querySelector(".readonly-tip").classList.toggle("show",readonly);
         ta.addEventListener("input",()=>{a[o.i]=ta.value;changed();save();card.classList.toggle("done",!!ta.value.trim())});mic.addEventListener("click",()=>toggleRecording(o.i,ta,mic,card));card.querySelector(".share-audio").addEventListener("click",()=>shareOneRecording(o.i));card.querySelector(".download-audio").addEventListener("click",()=>downloadRecording(o.i));card.querySelector(".delete-audio").addEventListener("click",()=>deleteRecording(o.i,card));showSavedRecording(o.i,card);sec.appendChild(card)});content.appendChild(sec)});updateProgress()
   }
@@ -105,13 +107,13 @@
   async function toggleRecording(i,ta,btn,card){
     if(activeRecording){if(activeRecording.key===audioKey(i))stopRecording();else notice.textContent="请先结束当前录音，再录下一题。";return}
     if(!navigator.mediaDevices||!window.MediaRecorder){notice.textContent="这个浏览器不能直接录音，请换用手机 Chrome 或 Safari。";return}
-    try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const preferred=MediaRecorder.isTypeSupported("audio/mp4")?"audio/mp4":(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"");const recorder=preferred?new MediaRecorder(stream,{mimeType:preferred}):new MediaRecorder(stream);const chunks=[],a=answers(),base=String(a[i]||"").trim(),recordScope=scope();let recognition=null,finishRecording;const done=new Promise(resolve=>finishRecording=resolve),R=window.SpeechRecognition||window.webkitSpeechRecognition;
+    try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const preferred=MediaRecorder.isTypeSupported("audio/mp4")?"audio/mp4":(MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"");const recorder=preferred?new MediaRecorder(stream,{mimeType:preferred}):new MediaRecorder(stream);const chunks=[],a=answers(),base=String(a[i]||"").trim(),recordScope=scope();let recognition=null,finishRecording;const done=new Promise(resolve=>finishRecording=resolve),R=IS_WECHAT?null:(window.SpeechRecognition||window.webkitSpeechRecognition);
       if(R){recognition=new R();recognition.lang="zh-CN";recognition.continuous=true;recognition.interimResults=true;recognition.onresult=e=>{let words="";for(let n=0;n<e.results.length;n++)words+=e.results[n][0].transcript;a[i]=(base?base+" ":"")+words;ta.value=a[i];changed();save()};recognition.onerror=()=>{notice.textContent="录音仍在保存；当前浏览器没有完成同步转文字，可以稍后手动修改。"}}
       recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onstop=async()=>{try{const blob=new Blob(chunks,{type:recorder.mimeType||preferred||"audio/webm"});await putRecording(i,{blob,type:blob.type,createdAt:Date.now()},recordScope);stream.getTracks().forEach(t=>t.stop());if(scope()===recordScope)await showSavedRecording(i,card);changed();const readyUrl=await prepareVisibleShareLink();shareLink.value=readyUrl;shareReadyTitle.textContent="✓ 第 "+(i+1)+" 题录音保存成功";shareReady.classList.add("show");notice.textContent="录音已经完整写入，现在可以生成并发送分享记录。";showToast("✓ 录音保存成功，可以分享了")}finally{finishRecording()}};
-      const started=Date.now(),time=card.querySelector(".record-time"),timer=setInterval(()=>{const seconds=Math.floor((Date.now()-started)/1000);time.textContent=Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")},500);activeRecording={key:audioKey(i),recorder,recognition,stream,btn,time,timer,done};recorder.start(500);if(recognition)try{recognition.start()}catch(e){}btn.textContent="■ 结束录音";btn.classList.add("on");notice.textContent=recognition?"正在录音并同步转文字。":"正在保存录音；此浏览器暂不支持同步转文字。"
+      const started=Date.now(),time=card.querySelector(".record-time"),timer=setInterval(()=>{const seconds=Math.floor((Date.now()-started)/1000);time.textContent=Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")},500);activeRecording={key:audioKey(i),recorder,recognition,stream,btn,time,timer,done};recorder.start(500);if(recognition)try{recognition.start()}catch(e){}btn.textContent="■ 结束录音";btn.classList.add("on");notice.textContent=IS_WECHAT?"正在录制原声。微信内不会自动转文字；结束后原声仍会保存。":(recognition?"正在录音并同步转文字。":"正在保存原声；当前浏览器没有自动转文字，可用手机键盘麦克风听写。")
     }catch(e){notice.textContent="无法使用麦克风，请在浏览器设置中允许麦克风权限。"}
   }
-  async function stopRecording(){const a=activeRecording;if(!a)return;clearInterval(a.timer);a.btn.textContent="🎙 开始录音";a.btn.classList.remove("on");a.time.textContent="";try{if(a.recognition)a.recognition.stop()}catch(e){}if(a.recorder.state!=="inactive")a.recorder.stop();activeRecording=null;await a.done}
+  async function stopRecording(){const a=activeRecording;if(!a)return;clearInterval(a.timer);a.btn.textContent=idleMicText();a.btn.classList.remove("on");a.time.textContent="";try{if(a.recognition)a.recognition.stop()}catch(e){}if(a.recorder.state!=="inactive")a.recorder.stop();activeRecording=null;await a.done}
   async function shareOneRecording(i){const r=await getRecording(i);if(!r)return;const f=audioFile(i,r);try{if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({title:"第"+(i+1)+"题录音",files:[f]});else downloadBlob(f,f.name)}catch(e){if(e.name!=="AbortError")downloadBlob(f,f.name)}}
   async function downloadRecording(i){const r=await getRecording(i);if(r){const f=audioFile(i,r);downloadBlob(f,f.name)}}
   function downloadBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
@@ -135,17 +137,17 @@
     if(mode==="pair"){await ensurePairSession();groups=[{answers:pair().mine,scope:"pair:"+pairId+":mine",label:"我的回答"},{answers:pair().partner,scope:"pair:"+pairId+":partner",label:"对方回答"}];label="双人关系问答";const payload=incoming&&incoming.kind==="invite"?{v:1,kind:"reply",id:pairId,ownerAnswers:pair().partner,partnerAnswers:pair().mine}:{v:1,kind:"invite",id:pairId,ownerAnswers:pair().mine};url+="#pair="+encodePayload(payload)}else{groups=[{answers:store.single,scope:"single",label:"我的回答"}];label="我的关系问答"}
     const hasText=groups.some(group=>Object.values(group.answers).some(v=>String(v).trim())),record=await buildWebRecord(groups,label),files=[record.file],text="完整文字与录音记录已放在一个可反复修改的网页文件中。";
     if(!hasText&&!record.saved.length){notice.textContent="请先填写文字或录一段声音，再一键分享。";return}
-    preparedShare={title,text,url,files,record,revision:contentRevision};shareLink.value=url;shareReadyTitle.textContent="✓ 全部文字和录音保存成功";shareReady.classList.add("show");notice.textContent="保存成功。请先复制链接，或点击“发送完整记录”。";showToast("✓ 全部内容保存成功，分享链接已生成");return preparedShare
+    preparedShare={title,text,url,files,record,revision:contentRevision};shareLink.value=url;shareReadyTitle.textContent="✓ 完整网页备份已整理成功";shareReady.classList.add("show");notice.textContent="本机备份已整理。要让对方只点一个链接就听到原声，请使用绿色的云端保存按钮。";showToast("✓ 文字和原声网页备份已整理完成");return preparedShare
   }
   async function sendPreparedRecord(){let prepared=preparedShare;if(!prepared||prepared.revision!==contentRevision)prepared=await prepareEverything();if(!prepared)return;const {title,text,url,files,record}=prepared;try{if(navigator.canShare&&navigator.canShare({files}))await navigator.share({title,text,url,files});else{downloadBlob(record.file,record.file.name);if(navigator.share)await navigator.share({title,text:text+" 已先保存网页文件，请把文件一起发送。",url});else{await navigator.clipboard.writeText(text+"\n"+url);notice.textContent="完整网页记录已保存，链接也已复制。"}}}catch(e){if(e.name!=="AbortError"){downloadBlob(record.file,record.file.name);notice.textContent="完整网页记录已保存，请把这个文件发给对方。"}}}
   async function cloudRequest(path,options){const response=await fetch(CLOUD_ORIGIN+path,options);let data=null;try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(data&&data.error&&data.error.message?data.error.message:"云端暂时没有接收成功（"+response.status+"）");return data}
-  function showCloudResult(saved){cloudShareLink.value=saved.shareUrl;cloudEditorLink.href=saved.editorUrl;cloudReady.classList.add("show");cloudStatus.textContent="已确认全部上传成功。请保存编辑入口；只读分享链接可以直接发给对方。"}
+  function showCloudResult(saved){cloudShareLink.value=saved.shareUrl;cloudEditorEntry.value=saved.editorUrl;cloudEditorLink.href=saved.editorUrl;cloudReady.classList.add("show");cloudStatus.textContent="已确认全部上传成功。浏览器分享链接可发给对方；我的编辑入口只给自己换到 Safari／Chrome 时使用。"}
   async function migrateOldContentToCloud(){const button=document.getElementById("cloudMigrate");button.disabled=true;button.textContent="正在迁移，请不要关闭页面…";cloudReady.classList.remove("show");try{if(activeRecording)await stopRecording();let groups;if(mode==="pair"){await ensurePairSession();groups=[{answers:pair().mine,scope:"pair:"+pairId+":mine",role:"owner"},{answers:pair().partner,scope:"pair:"+pairId+":partner",role:"partner"}]}else{groups=[{answers:store.single,scope:"single",role:"owner"}]}
       for(const group of groups)group.audio=await getRecordingsForScope(group.scope);const hasContent=groups.some(group=>Object.values(group.answers).some(value=>String(value).trim())||group.audio.length);if(!hasContent)throw new Error("本机还没有找到可迁移的文字或录音。");
       notice.textContent="正在建立云端记录…";const created=await cloudRequest("/api/records",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:mode==="pair"?"pair":"single"})});let partnerToken="";if(created.partnerInviteUrl){const invite=new URL(created.partnerInviteUrl,CLOUD_ORIGIN);partnerToken=new URLSearchParams(invite.hash.slice(1)).get("edit")||""}const tokens={owner:created.editToken,partner:partnerToken};let completed=0,total=groups.reduce((sum,group)=>sum+Object.values(group.answers).filter(value=>String(value).trim()).length+group.audio.length,0);
       for(const group of groups){const token=tokens[group.role];if(!token)throw new Error("没有取得双人记录的另一把编辑密钥。");for(const key of Object.keys(group.answers)){const text=String(group.answers[key]||"");if(!text.trim())continue;const questionId="q"+(Number(key)+1);await cloudRequest("/api/records/"+encodeURIComponent(created.record.id)+"/answers/"+questionId,{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({text})});completed++;notice.textContent="正在上传旧内容 "+completed+"/"+total+"…"}for(const item of group.audio){const blob=item.data.blob,type=item.data.type||blob.type||"audio/webm",questionId="q"+(Number(item.i)+1);await cloudRequest("/api/records/"+encodeURIComponent(created.record.id)+"/answers/"+questionId+"/audio",{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":type},body:blob});completed++;notice.textContent="正在上传旧内容 "+completed+"/"+total+"…"}}
       notice.textContent="正在核对并生成固定分享链接…";const published=await cloudRequest("/api/records/"+encodeURIComponent(created.record.id)+"/publish",{method:"POST",headers:{Authorization:"Bearer "+created.editToken}});const partnerPart=partnerToken?"&partner="+encodeURIComponent(partnerToken):"",saved={editorUrl:CLOUD_ORIGIN+"/?record="+encodeURIComponent(created.record.id)+"#edit="+encodeURIComponent(created.editToken)+partnerPart,shareUrl:new URL(published.shareUrl,CLOUD_ORIGIN).toString(),savedAt:Date.now()};localStorage.setItem(CLOUD_MIGRATION_KEY,JSON.stringify(saved));showCloudResult(saved);notice.textContent="✓ 旧文字和录音已全部迁移，云端分享链接已生成。";showToast("✓ 全部旧内容已保存到云端")
-    }catch(e){notice.textContent="迁移没有完成："+(e&&e.message?e.message:"请检查网络后重试")+"。旧内容仍安全保留在本机，没有被删除。"}finally{button.disabled=false;button.textContent="把本机旧内容迁移到云端新版"}}
+    }catch(e){notice.textContent="保存到云端没有完成："+(e&&e.message?e.message:"请检查网络后重试")+"。原内容仍安全保留在本机，没有被删除。"}finally{button.disabled=false;button.textContent="保存到云端并生成浏览器链接"}}
   document.getElementById("singleMode").onclick=()=>{if(activeRecording)stopRecording();mode="single";save();render()};
   document.getElementById("pairMode").onclick=()=>{if(activeRecording)stopRecording();mode="pair";save();render()};
   document.getElementById("mineTab").onclick=()=>{if(activeRecording)stopRecording();side="mine";render()};
@@ -153,6 +155,7 @@
   document.getElementById("export").onclick=()=>{const b=new Blob([answerText()],{type:"text/plain;charset=utf-8"}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=(mode==="pair"?(side==="mine"?"我的回答":"对方回答"):"我的回答")+".txt";a.click();URL.revokeObjectURL(u)};
   document.getElementById("share").onclick=shareTextAndAudio;document.getElementById("invite").onclick=sharePairLink;document.getElementById("shareAll").onclick=prepareEverything;document.getElementById("sendRecord").onclick=sendPreparedRecord;document.getElementById("cloudMigrate").onclick=migrateOldContentToCloud;document.getElementById("copyShareLink").onclick=async()=>{if(!shareLink.value)shareLink.value=await prepareVisibleShareLink();try{await navigator.clipboard.writeText(shareLink.value);notice.textContent="分享链接已复制。请同时发送完整记录文件，对方才能听到录音。";showToast("✓ 分享链接已复制")}catch(e){shareLink.focus();shareLink.select();notice.textContent="请长按上面的链接复制。"}};
   document.getElementById("copyCloudShare").onclick=async()=>{try{await navigator.clipboard.writeText(cloudShareLink.value);notice.textContent="云端分享链接已复制，可以发给对方。";showToast("✓ 云端分享链接已复制")}catch(e){cloudShareLink.focus();cloudShareLink.select();notice.textContent="请长按上面的云端链接复制。"}};
-  filter.onclick=()=>{onlyEmpty=!onlyEmpty;filter.textContent=onlyEmpty?"✓ 只看未回答":"只看未回答";render()};search.oninput=render;try{const migrated=JSON.parse(localStorage.getItem(CLOUD_MIGRATION_KEY)||"null");if(migrated&&migrated.editorUrl&&migrated.shareUrl)showCloudResult(migrated)}catch(e){}save();render();
+  document.getElementById("copyCloudEditor").onclick=async()=>{try{await navigator.clipboard.writeText(cloudEditorEntry.value);notice.textContent="我的编辑入口已复制。请到 Safari 或 Chrome 地址栏粘贴打开；不要把它发给别人。";showToast("✓ 我的编辑入口已复制")}catch(e){cloudEditorEntry.focus();cloudEditorEntry.select();notice.textContent="请长按上面的我的编辑入口复制。"}};
+  filter.onclick=()=>{onlyEmpty=!onlyEmpty;filter.textContent=onlyEmpty?"✓ 只看未回答":"只看未回答";render()};search.oninput=render;try{const migrated=JSON.parse(localStorage.getItem(CLOUD_MIGRATION_KEY)||"null");if(migrated&&migrated.editorUrl&&migrated.shareUrl)showCloudResult(migrated)}catch(e){}save();render();if(IS_WECHAT&&!notice.textContent)notice.textContent="微信内可以录下并保存原声，但不能可靠地自动转文字。需要转文字时，请保存到云端后复制‘我的编辑入口’，用 Safari 或 Chrome 打开。";
   </script>
 </body></html>
