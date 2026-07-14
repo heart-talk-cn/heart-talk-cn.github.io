@@ -23,6 +23,11 @@
     <p class="pair-note" id="pairNote">双人版中，“我的回答”和“对方回答”使用两份独立记录。</p>
     <div class="progress"><div class="track"><span class="bar" id="bar"></span></div><strong id="count">0/0</strong></div>
   </div></header>
+  <section class="multi-entry" id="oldRecovery" style="background:#fff4e7;border-color:#d4a06e;border-left-color:#b56a32">
+    <h2 style="color:#7a4526">旧内容打不开或一直加载？</h2>
+    <p>你的旧回答和录音通常还保存在原来填写的手机浏览器里。打开轻量找回页，可以把它们保存到云端并生成能发给别人的固定链接。</p>
+    <div class="multi-entry-actions"><input value="https://heart-talk-cn.github.io/recover.html" readonly aria-label="旧内容找回链接"><button id="copyRecoveryLink">复制找回链接</button><a href="/recover.html">找回我的旧内容</a></div>
+  </section>
   <section class="multi-entry" aria-labelledby="multi-entry-title">
     <h2 id="multi-entry-title">多人独立填写入口</h2>
     <p><strong>同一条公开链接可以发给多个朋友。</strong>每个人点击“开始我的回答”后都会建立自己的独立记录，彼此互不覆盖；这条入口不含任何人的编辑密钥，可以放心转发。</p>
@@ -69,6 +74,7 @@
   let mode=localStorage.getItem(MODE_KEY)==="pair"?"pair":"single";
   let pairId="local",side="mine",incoming=null,onlyEmpty=false,activeRecording=null,preparedShare=null,contentRevision=0,toastTimer=null;
   const audioUrls={};
+  let recordingIndexScope="",recordingIndexPromise=null;
   const content=document.getElementById("content"),notice=document.getElementById("notice"),search=document.getElementById("search"),filter=document.getElementById("filter"),shareReady=document.getElementById("shareReady"),shareLink=document.getElementById("shareLink"),shareReadyTitle=document.getElementById("shareReadyTitle"),saveToast=document.getElementById("saveToast"),cloudReady=document.getElementById("cloudReady"),cloudStatus=document.getElementById("cloudStatus"),cloudShareLink=document.getElementById("cloudShareLink"),cloudEditorEntry=document.getElementById("cloudEditorEntry"),cloudEditorLink=document.getElementById("cloudEditorLink"),multiEntryLink=document.getElementById("multiEntryLink"),openMultiEntry=document.getElementById("openMultiEntry");
   multiEntryLink.value=MULTI_ENTRY_URL;openMultiEntry.href=MULTI_ENTRY_URL;
 
@@ -103,12 +109,14 @@
         ta.addEventListener("input",()=>{a[o.i]=ta.value;changed();save();card.classList.toggle("done",!!ta.value.trim())});mic.addEventListener("click",()=>toggleRecording(o.i,ta,mic,card));card.querySelector(".share-audio").addEventListener("click",()=>shareOneRecording(o.i));card.querySelector(".download-audio").addEventListener("click",()=>downloadRecording(o.i));card.querySelector(".delete-audio").addEventListener("click",()=>deleteRecording(o.i,card));showSavedRecording(o.i,card);sec.appendChild(card)});content.appendChild(sec)});updateProgress()
   }
   function openAudioDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open("relationship-audio-v1",1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains("recordings"))req.result.createObjectStore("recordings")};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-  async function putRecording(i,value,targetScope=scope()){const db=await openAudioDb(),k=targetScope+":"+i;return new Promise((resolve,reject)=>{const tx=db.transaction("recordings","readwrite");tx.objectStore("recordings").put({...value,key:k,i,scope:targetScope},k);tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>reject(tx.error)})}
-  async function getRecording(i){const db=await openAudioDb(),k=audioKey(i);return new Promise((resolve,reject)=>{const req=db.transaction("recordings").objectStore("recordings").get(k);req.onsuccess=()=>{db.close();resolve(req.result)};req.onerror=()=>reject(req.error)})}
+  function invalidateRecordingIndex(){recordingIndexScope="";recordingIndexPromise=null}
+  async function recordingIndex(){const target=scope();if(recordingIndexScope===target&&recordingIndexPromise)return recordingIndexPromise;recordingIndexScope=target;recordingIndexPromise=getRecordingsForScope(target).then(items=>new Map(items.map(item=>[Number(item.i),item.data])));return recordingIndexPromise}
+  async function putRecording(i,value,targetScope=scope()){const db=await openAudioDb(),k=targetScope+":"+i;return new Promise((resolve,reject)=>{const tx=db.transaction("recordings","readwrite");tx.objectStore("recordings").put({...value,key:k,i,scope:targetScope},k);tx.oncomplete=()=>{db.close();invalidateRecordingIndex();resolve()};tx.onerror=()=>reject(tx.error)})}
+  async function getRecording(i){const index=await recordingIndex();return index.get(Number(i))}
   async function getRecordingsForScope(targetScope){const db=await openAudioDb();return new Promise((resolve,reject)=>{const req=db.transaction("recordings").objectStore("recordings").getAll();req.onsuccess=()=>{const items=req.result.filter(v=>v&&v.scope===targetScope).map(v=>({i:v.i,data:v}));db.close();resolve(items)};req.onerror=()=>reject(req.error)})}
   async function getAllRecordings(){return getRecordingsForScope(scope())}
   async function copyRecordings(fromScope,toScope){const items=await getRecordingsForScope(fromScope);if(!items.length)return;const db=await openAudioDb();return new Promise((resolve,reject)=>{const tx=db.transaction("recordings","readwrite"),objectStore=tx.objectStore("recordings");items.forEach(({i,data})=>objectStore.put({...data,key:toScope+":"+i,scope:toScope},toScope+":"+i));tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>reject(tx.error)})}
-  async function removeRecording(i){const db=await openAudioDb(),k=audioKey(i);return new Promise((resolve,reject)=>{const tx=db.transaction("recordings","readwrite");tx.objectStore("recordings").delete(k);tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>reject(tx.error)})}
+  async function removeRecording(i){const db=await openAudioDb(),k=audioKey(i);return new Promise((resolve,reject)=>{const tx=db.transaction("recordings","readwrite");tx.objectStore("recordings").delete(k);tx.oncomplete=()=>{db.close();invalidateRecordingIndex();resolve()};tx.onerror=()=>reject(tx.error)})}
   function audioFile(i,r,whoOverride){const ext=(r.type||"").includes("mp4")?"m4a":"webm",who=whoOverride||(mode==="pair"?(side==="mine"?"我的":"对方的"):"我的");return new File([r.blob],who+"第"+(Number(i)+1)+"题录音."+ext,{type:r.type||r.blob.type})}
   async function showSavedRecording(i,card){const r=await getRecording(i),box=card.querySelector(".audio-box"),audio=box.querySelector("audio"),k=audioKey(i);if(!r){box.classList.remove("show");return}if(audioUrls[k])URL.revokeObjectURL(audioUrls[k]);audioUrls[k]=URL.createObjectURL(r.blob);audio.src=audioUrls[k];box.classList.add("show")}
   async function toggleRecording(i,ta,btn,card){
@@ -164,6 +172,7 @@
   document.getElementById("copyCloudShare").onclick=async()=>{try{await navigator.clipboard.writeText(cloudShareLink.value);notice.textContent="云端分享链接已复制，可以发给对方。";showToast("✓ 云端分享链接已复制")}catch(e){cloudShareLink.focus();cloudShareLink.select();notice.textContent="请长按上面的云端链接复制。"}};
   document.getElementById("copyCloudEditor").onclick=async()=>{try{await navigator.clipboard.writeText(cloudEditorEntry.value);notice.textContent="我的编辑入口已复制。请到 Safari 或 Chrome 地址栏粘贴打开；不要把它发给别人。";showToast("✓ 我的编辑入口已复制")}catch(e){cloudEditorEntry.focus();cloudEditorEntry.select();notice.textContent="请长按上面的我的编辑入口复制。"}};
   document.getElementById("copyMultiEntry").onclick=async()=>{try{await navigator.clipboard.writeText(MULTI_ENTRY_URL);notice.textContent="多人独立填写入口已复制。同一条链接可以发给多个朋友，每个人都会建立自己的独立记录。";showToast("✓ 多人入口链接已复制")}catch(e){multiEntryLink.focus();multiEntryLink.select();notice.textContent="请长按上面的多人入口链接复制。"}};
+  document.getElementById("copyRecoveryLink").onclick=async()=>{const value="https://heart-talk-cn.github.io/recover.html";try{await navigator.clipboard.writeText(value);notice.textContent="找回链接已复制。请用原来填写内容的同一个手机浏览器打开。";showToast("✓ 找回链接已复制")}catch(e){notice.textContent="请打开页面上方的‘找回我的旧内容’。"}};
   filter.onclick=()=>{onlyEmpty=!onlyEmpty;filter.textContent=onlyEmpty?"✓ 只看未回答":"只看未回答";render()};search.oninput=render;try{const migrated=JSON.parse(localStorage.getItem(CLOUD_MIGRATION_KEY)||"null");if(migrated&&migrated.editorUrl&&migrated.shareUrl)showCloudResult(migrated)}catch(e){}save();render();if(IS_WECHAT&&!notice.textContent)notice.textContent="微信内可以录下并保存原声，但不能可靠地自动转文字。需要转文字时，请保存到云端后复制‘我的编辑入口’，用 Safari 或 Chrome 打开。";
   </script>
 </body></html>
