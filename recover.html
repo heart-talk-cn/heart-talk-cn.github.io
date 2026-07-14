@@ -20,7 +20,7 @@
       <div class="actions">
         <button id="recover" disabled>保存旧内容并生成分享链接</button>
         <button class="secondary" id="backup" disabled>先下载一份文字安全备份</button>
-        <a id="newEntry" href="https://heart-talk-mobile.heart-talk-cn-space.workers.dev/?new=1">没有旧内容，打开新版填写</a>
+        <a id="newEntry" href="https://heart-talk-cn-api.pages.dev/?new=1">没有旧内容，打开新版填写</a>
       </div>
       <p class="progress" id="progress"></p>
       <div class="links" id="links">
@@ -33,7 +33,8 @@
     <p class="warning">如果显示“没有找到”，通常是因为打开了不同的浏览器。例如以前在 Safari 填写，就必须仍用 Safari 打开；以前在微信里填写，就要从微信里打开。</p>
   </main>
   <script>
-  const CLOUD="https://heart-talk-mobile.heart-talk-cn-space.workers.dev",STORE="relationship-dual-v1",OLD="relationship-question-answers-v2",MODE="relationship-mode-v1",MIGRATED="heart-talk-cloud-migration-v1";
+  const CLOUDS=["https://heart-talk-cn-api.pages.dev","https://heart-talk-mobile.heart-talk-cn-space.workers.dev"],STORE="relationship-dual-v1",OLD="relationship-question-answers-v2",MODE="relationship-mode-v1",MIGRATED="heart-talk-cloud-migration-v1";
+  let cloud=CLOUDS[0];
   const statusEl=document.getElementById("status"),detailEl=document.getElementById("detail"),recoverBtn=document.getElementById("recover"),backupBtn=document.getElementById("backup"),progressEl=document.getElementById("progress"),linksEl=document.getElementById("links"),shareLink=document.getElementById("shareLink"),editLink=document.getElementById("editLink"),openEdit=document.getElementById("openEdit");
   let recovery=null;
   function json(key,fallback){try{return JSON.parse(localStorage.getItem(key)||"null")||fallback}catch(e){return fallback}}
@@ -50,7 +51,8 @@
     return null;
   }
   function showSaved(saved){shareLink.value=saved.shareUrl;editLink.value=saved.editorUrl;openEdit.href=saved.editorUrl;linksEl.classList.add("show");statusEl.textContent="已经找到之前保存成功的云端记录";detailEl.textContent="可以直接复制分享链接，或打开自己的编辑链接继续填写。"}
-  async function request(path,options){const response=await fetch(CLOUD+path,options);let data=null;try{data=await response.json()}catch(e){}if(!response.ok)throw new Error(data&&data.error&&data.error.message?data.error.message:"网络保存失败（"+response.status+"）");return data}
+  async function request(path,options={}){let lastError=null;const candidates=[cloud,...CLOUDS].filter((value,index,array)=>array.indexOf(value)===index);for(const base of candidates){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);try{const response=await fetch(base+path,{...options,signal:controller.signal});let data=null;try{data=await response.json()}catch(e){}if(response.ok){cloud=base;return data}const message=data&&data.error&&data.error.message?data.error.message:"网络保存失败（"+response.status+"）";if(response.status<500&&response.status!==408)throw new Error(message);lastError=new Error(message)}catch(e){lastError=e}finally{clearTimeout(timer)}}throw new Error(lastError&&lastError.name==="AbortError"?"连接云端超过15秒，已停止等待":(lastError&&lastError.message?lastError.message:"无法连接云端"))}
+  async function runPool(jobs,limit,onDone){let cursor=0,finished=0;async function worker(){while(cursor<jobs.length){const job=jobs[cursor++];await request(job.path,job.options);onDone(++finished,jobs.length)}}await Promise.all(Array.from({length:Math.min(limit,jobs.length)},worker))}
   async function init(){
     const saved=json(MIGRATED,null);if(saved&&saved.shareUrl&&saved.editorUrl)showSaved(saved);
     let store=json(STORE,{single:{},pairs:{}});const old=json(OLD,{});if(!textCount(store.single)&&textCount(old)){store.single={...old};store.pairs=store.pairs||{};store.pairs.local=store.pairs.local||{mine:{...old},partner:{}}}
@@ -62,11 +64,12 @@
   async function migrate(){
     recoverBtn.disabled=true;backupBtn.disabled=true;progressEl.classList.add("show");linksEl.classList.remove("show");
     try{
-      progressEl.textContent="正在建立新的云端记录……";const created=await request("/api/records",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:recovery.mode})});let partnerToken="";
-      if(created.partnerInviteUrl){const invite=new URL(created.partnerInviteUrl,CLOUD);partnerToken=new URLSearchParams(invite.hash.slice(1)).get("edit")||""}
-      const tokens={owner:created.editToken,partner:partnerToken};let done=0;const scopedAudio=recovery.audio.filter(x=>recovery.groups.some(g=>g.scope===x.scope)),total=recovery.groups.reduce((n,g)=>n+textCount(g.answers),0)+scopedAudio.length;
-      for(const group of recovery.groups){const token=tokens[group.role];if(!token)throw new Error("没有取得完整的编辑权限");for(const key of Object.keys(group.answers||{})){const value=String(group.answers[key]||"");if(!value.trim())continue;await request("/api/records/"+encodeURIComponent(created.record.id)+"/answers/q"+(Number(key)+1),{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({text:value})});progressEl.textContent="正在保存旧内容 "+(++done)+"/"+total+"……"}for(const item of scopedAudio.filter(x=>x.scope===group.scope)){const blob=item.blob,type=item.type||blob.type||"audio/webm";await request("/api/records/"+encodeURIComponent(created.record.id)+"/answers/q"+(Number(item.i)+1)+"/audio",{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":type},body:blob});progressEl.textContent="正在保存旧内容 "+(++done)+"/"+total+"……"}}
-      progressEl.textContent="正在核对并生成分享链接……";const published=await request("/api/records/"+encodeURIComponent(created.record.id)+"/publish",{method:"POST",headers:{Authorization:"Bearer "+created.editToken}});const partnerPart=partnerToken?"&partner="+encodeURIComponent(partnerToken):"",saved={editorUrl:CLOUD+"/?record="+encodeURIComponent(created.record.id)+"#edit="+encodeURIComponent(created.editToken)+partnerPart,shareUrl:new URL(published.shareUrl,CLOUD).toString(),savedAt:Date.now()};localStorage.setItem(MIGRATED,JSON.stringify(saved));showSaved(saved);statusEl.textContent="✓ 旧文字和录音已经全部保存成功";detailEl.textContent="现在可以把分享链接发给别人；原来手机里的内容仍保留，没有删除。";progressEl.textContent="保存完成。";
+      progressEl.textContent="正在连接更快的云端入口……";const created=await request("/api/records",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode:recovery.mode})});let partnerToken="";
+      if(created.partnerInviteUrl){const invite=new URL(created.partnerInviteUrl,cloud);partnerToken=new URLSearchParams(invite.hash.slice(1)).get("edit")||""}
+      const tokens={owner:created.editToken,partner:partnerToken},textJobs=[],audioJobs=[],scopedAudio=recovery.audio.filter(x=>recovery.groups.some(g=>g.scope===x.scope));
+      for(const group of recovery.groups){const token=tokens[group.role];if(!token)throw new Error("没有取得完整的编辑权限");for(const key of Object.keys(group.answers||{})){const value=String(group.answers[key]||"");if(!value.trim())continue;textJobs.push({path:"/api/records/"+encodeURIComponent(created.record.id)+"/answers/q"+(Number(key)+1),options:{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({text:value})}})}for(const item of scopedAudio.filter(x=>x.scope===group.scope)){const blob=item.blob,type=item.type||blob.type||"audio/webm";audioJobs.push({path:"/api/records/"+encodeURIComponent(created.record.id)+"/answers/q"+(Number(item.i)+1)+"/audio",options:{method:"PUT",headers:{Authorization:"Bearer "+token,"Content-Type":type},body:blob}})}}
+      await runPool(textJobs,4,(done,total)=>progressEl.textContent="正在分批保存文字 "+done+"/"+total+"……");await runPool(audioJobs,2,(done,total)=>progressEl.textContent="正在分批保存录音 "+done+"/"+total+"……");
+      progressEl.textContent="正在核对并生成分享链接……";const published=await request("/api/records/"+encodeURIComponent(created.record.id)+"/publish",{method:"POST",headers:{Authorization:"Bearer "+created.editToken}});const partnerPart=partnerToken?"&partner="+encodeURIComponent(partnerToken):"",saved={editorUrl:cloud+"/?record="+encodeURIComponent(created.record.id)+"#edit="+encodeURIComponent(created.editToken)+partnerPart,shareUrl:new URL(published.shareUrl,cloud).toString(),savedAt:Date.now()};localStorage.setItem(MIGRATED,JSON.stringify(saved));showSaved(saved);statusEl.textContent="✓ 旧文字和录音已经全部保存成功";detailEl.textContent="现在可以把分享链接发给别人；原来手机里的内容仍保留，没有删除。";progressEl.textContent="保存完成。";
     }catch(e){statusEl.textContent="保存还没有完成";detailEl.textContent=(e&&e.message?e.message:"请检查网络后重试")+"。原来的文字和录音没有被删除。";progressEl.textContent="请稍后重新点击保存。";recoverBtn.disabled=false;backupBtn.disabled=false}
   }
   function backup(){const payload={savedAt:new Date().toISOString(),mode:recovery.mode,groups:recovery.groups.map(g=>({role:g.role,answers:g.answers}))},blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="关系问答文字安全备份.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1500)}
